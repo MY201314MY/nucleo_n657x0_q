@@ -58,3 +58,12 @@ The control board is selected using the shell wildcard pattern
 reconnections of the same board. Connect only one matching control board.
 The script stops if no device or multiple devices match, a serial write
 fails, resetting fails, or flashing fails.
+
+Debugging
+*********
+
+Run ``sh debug.sh`` after flashing the application. The script loads
+MCUboot, runs to ``do_boot``, adds the application symbols, and stops at
+the application's ``main``. Enter ``c`` in GDB to run the application.
+GDB startup commands are kept in ``debug.sh`` itself; no temporary files
+or separate wrapper scripts are needed.
