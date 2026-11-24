@@ -1,0 +1,560 @@
+diff --git a/boards/st/nucleo_h7s3l8/board.cmake b/boards/st/nucleo_h7s3l8/board.cmake
+index 0be27a0a93f..5af655a9860 100644
+--- a/boards/st/nucleo_h7s3l8/board.cmake
++++ b/boards/st/nucleo_h7s3l8/board.cmake
+@@ -5,16 +5,12 @@ board_runner_args(stm32cubeprogrammer "--port=swd" "--reset-mode=hw")
+ if(CONFIG_FLASH_STM32_NOR_MEMMAP OR CONFIG_BOOTLOADER_MCUBOOT)
+   board_runner_args(stm32cubeprogrammer "--extload=MX25UW25645G_NUCLEO-H7S3L8.stldr")
+ endif()
+-board_runner_args(openocd --target-handle=_CHIPNAME.cpu0)
+-
+-board_runner_args(pyocd "--target=stm32h7s3l8hx")
+-board_runner_args(pyocd "--flash-opt=-O reset_type=hw")
+-board_runner_args(pyocd "--flash-opt=-O connect_mode=under-reset")
+-
+-board_runner_args(jlink "--device=STM32H7S3L8" "--speed=4000")
+ 
+ # keep first
+ include(${ZEPHYR_BASE}/boards/common/stm32cubeprogrammer.board.cmake)
+-include(${ZEPHYR_BASE}/boards/common/pyocd.board.cmake)
+-include(${ZEPHYR_BASE}/boards/common/openocd-stm32.board.cmake)
+-include(${ZEPHYR_BASE}/boards/common/jlink.board.cmake)
++
++
++board_runner_args(stlink_gdbserver "--apid=1")
++board_runner_args(stlink_gdbserver "--extload=MX25UW25645G_NUCLEO-H7S3L8.stldr")
++
++include(${ZEPHYR_BASE}/boards/common/stlink_gdbserver.board.cmake)
+\ No newline at end of file
+diff --git a/boards/st/nucleo_h7s3l8/nucleo_h7s3l8-common.dtsi b/boards/st/nucleo_h7s3l8/nucleo_h7s3l8-common.dtsi
+index c3a699e5bdf..7df84b853b0 100644
+--- a/boards/st/nucleo_h7s3l8/nucleo_h7s3l8-common.dtsi
++++ b/boards/st/nucleo_h7s3l8/nucleo_h7s3l8-common.dtsi
+@@ -228,7 +228,7 @@
+ 		compatible = "st,stm32-xspi-nor";
+ 		reg = <0>;
+ 		size = <DT_SIZE_M(256)>; /* 256Mbits */
+-		ospi-max-frequency = <DT_FREQ_M(50)>;
++		ospi-max-frequency = <DT_FREQ_M(64)>;
+ 		spi-bus-width = <XSPI_OCTO_MODE>;
+ 		data-rate = <XSPI_DTR_TRANSFER>;
+ 		four-byte-opcodes;
+diff --git a/boards/st/nucleo_n657x0_q/Kconfig.sysbuild b/boards/st/nucleo_n657x0_q/Kconfig.sysbuild
+new file mode 100644
+index 00000000000..a77c3add148
+--- /dev/null
++++ b/boards/st/nucleo_n657x0_q/Kconfig.sysbuild
+@@ -0,0 +1,10 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++if BOARD_NUCLEO_N657X0_Q_STM32N657XX
++
++choice BOOTLOADER
++	default BOOTLOADER_MCUBOOT
++endchoice
++
++endif # BOARD_NUCLEO_N657X0_Q_STM32N657XX
+diff --git a/boards/st/nucleo_n657x0_q/board.cmake b/boards/st/nucleo_n657x0_q/board.cmake
+index ee7701099a3..57b2de8f290 100644
+--- a/boards/st/nucleo_n657x0_q/board.cmake
++++ b/boards/st/nucleo_n657x0_q/board.cmake
+@@ -10,7 +10,13 @@ else()
+   board_runner_args(stm32cubeprogrammer "--no-reset")
+   board_runner_args(stm32cubeprogrammer "--tool-opt= mode=HOTPLUG ap=1")
+   board_runner_args(stm32cubeprogrammer "--extload=MX25UM51245G_STM32N6570-NUCLEO.stldr")
+-  board_runner_args(stm32cubeprogrammer "--download-address=0x70000000")
++  if(CONFIG_BOOTLOADER_MCUBOOT)
++    dt_chosen(app_partition_node PROPERTY "zephyr,code-partition")
++  else()
++    dt_chosen(app_partition_node PROPERTY "zephyr,flash")
++  endif()
++  dt_reg_addr(app_base_addr PATH "${app_partition_node}")
++  board_runner_args(stm32cubeprogrammer "--download-address=${app_base_addr}")
+ endif()
+ 
+ board_runner_args(stlink_gdbserver "--apid=1")
+diff --git a/boards/st/nucleo_n657x0_q/board.yml b/boards/st/nucleo_n657x0_q/board.yml
+index 4261dec1e7b..a9652b76d56 100644
+--- a/boards/st/nucleo_n657x0_q/board.yml
++++ b/boards/st/nucleo_n657x0_q/board.yml
+@@ -6,3 +6,4 @@ board:
+     - name: stm32n657xx
+       variants:
+         - name: sb
++        - name: fsbl
+diff --git a/boards/st/nucleo_n657x0_q/doc/index.rst b/boards/st/nucleo_n657x0_q/doc/index.rst
+index 186986636f0..9afc14fe337 100644
+--- a/boards/st/nucleo_n657x0_q/doc/index.rst
++++ b/boards/st/nucleo_n657x0_q/doc/index.rst
+@@ -185,6 +185,52 @@ on this bootloader.
+ Integration of this bootloader in the Zephyr build environment is available
+ in the external `STM32 OEMxROT module`_.
+ 
++Board variants
++**************
++
++Three variants are available:
++
++- The default ``nucleo_n657x0_q`` target is a chainloaded application. It executes
++  directly from external flash (XIP) and uses AXISRAM1 for data and stacks.
++  Build it with ``--sysbuild`` to include MCUboot.
++- ``nucleo_n657x0_q//fsbl`` is a first-stage image loaded by the Boot ROM into
++  AXISRAM2 and programmed into external flash using ST-Link. Sysbuild uses this
++  variant for MCUboot, which initializes memory-mapped flash before starting
++  the XIP application.
++- ``nucleo_n657x0_q//sb`` runs in AXISRAM2 and is loaded through the USB serial
++  boot interface. It is not retained after power-off.
++
++The external MX25UM51245G flash has the following partitions:
++
++.. list-table::
++   :header-rows: 1
++
++   * - Partition
++     - Flash offset
++     - Size
++   * - MCUboot
++     - ``0x0``
++     - 256 KiB
++   * - Primary application
++     - ``0x40000``
++     - 4 MiB
++   * - Secondary application
++     - ``0x440000``
++     - 4 MiB
++   * - Storage
++     - ``0x840000``
++     - 8 MiB
++
++Flash is memory-mapped at ``0x70000000``. The partitions are contiguous and
++occupy the first 16 MiB plus 256 KiB of the 64 MiB flash. Storage ends at
++offset ``0x1040000`` and does not reach the final 32 bytes of the flash affected
++by the STM32N6 DQS wrap erratum (ES0620 Rev 1, section 2.4.5).
++Switching from the previous RAM-loaded image requires programming
++both MCUboot and the application; old images at flash offset zero are replaced.
++Changing partition offsets or sizes requires rebuilding and programming both
++images so that MCUboot and the application use the same partition layout.
++Existing storage data at the previous offset is not migrated automatically.
++
+ Programming and Debugging
+ *************************
+ 
+@@ -203,16 +249,19 @@ so its :ref:`installation <stm32cubeprog-flash-host-tools>` is needed.
+ Version 2.18.0 or later of `STM32CubeProgrammer`_ is required.
+ 
+ .. note::
+-   Firmware is run in secure mode of execution, which requires a signature.
+-   After build, the build system  will automatically generate a signed version of the
+-   binary using `STM32CubeProgrammer`_ utility ``STM32_SigningTool_CLI``.
++   Firmware runs in secure mode. The build system generates the Boot ROM header
++   for the first-stage image using ``STM32_SigningTool_CLI``.
+    This utility is installed along with `STM32CubeProgrammer`_, but make sure it is
+    available in your ``PATH`` variable.
++   Sysbuild also signs the application for MCUboot. The default MCUboot key is
++   for development only; use your own signing key for production.
+ 
+ To program the board, there are two options:
+ 
+-- Program the firmware in external flash. At boot, it will then be loaded on RAM
+-  and executed from there.
++- Program MCUboot and the application into external flash. At boot, the Boot ROM
++  loads MCUboot into RAM. MCUboot initializes XSPI and starts the application
++  directly in external flash, without copying its code into RAM. Application
++  data, stacks, and the first-stage bootloader still require RAM.
+ - Optionally, it can also be taken advantage from the serial boot interface provided
+   by the boot ROM. In that case, firmware is directly loaded in RAM and executed from
+   there. It is not retained in persistent memory.
+@@ -226,13 +275,15 @@ First, connect the NUCLEO-N657X0-Q to your host computer using the ST-Link USB p
+ 
+    .. tabs::
+ 
+-      .. group-tab:: ST-Link
++      .. group-tab:: XIP application - ST-Link
+ 
+-         Build and flash an application using ``nucleo_n657x0_q`` target.
++         Build and flash MCUboot and the XIP application using the existing
++         ``nucleo_n657x0_q`` target.
+ 
+          .. zephyr-app-commands::
+             :zephyr-app: samples/hello_world
+             :board: nucleo_n657x0_q
++            :west-args: --sysbuild
+             :goals: build flash
+ 
+          .. note::
+@@ -248,6 +299,23 @@ First, connect the NUCLEO-N657X0-Q to your host computer using the ST-Link USB p
+ 
+             Power off and on the board again.
+ 
++         .. note::
++            XIP does not change the Boot ROM's boot-pin requirements. Keep
++            BOOT0 and BOOT1 at zero for normal power-on boot. Entering development
++            mode for ST-Link flashing or debugging still requires BOOT1 at one.
++
++      .. group-tab:: First-stage image - ST-Link
++
++         To build a standalone RAM-loaded first-stage application instead of
++         the XIP application, use ``nucleo_n657x0_q//fsbl``:
++
++         .. zephyr-app-commands::
++            :zephyr-app: samples/hello_world
++            :board: nucleo_n657x0_q//fsbl
++            :goals: build flash
++
++         Use the same boot-pin settings as for ST-Link flashing above.
++
+       .. group-tab:: Serial Boot Loader (USB)
+ 
+          Additionally to the USB/ST-Link, connect the NUCLEO-N657X0-Q to your
+@@ -289,14 +357,25 @@ You should see the following message on the console:
+ Debugging
+ =========
+ 
+-You can debug an application in the usual way using the :ref:`ST-LINK GDB Server <runner_stlink_gdbserver>`.
+-Here is an example for the :zephyr:code-sample:`hello_world` application.
++You can debug using the :ref:`ST-LINK GDB Server <runner_stlink_gdbserver>`.
++For a sysbuild XIP application, first flash both images, then debug MCUboot:
++
++.. code-block:: console
++
++   west debug --domain mcuboot
++
++Break at ``do_boot`` and load the application symbols before continuing:
++
++.. code-block:: console
++
++   (gdb) b do_boot
++   (gdb) c
++   (gdb) add-symbol-file ./build/hello_world/zephyr/zephyr.elf
++   (gdb) b main
++   (gdb) c
+ 
+-.. zephyr-app-commands::
+-   :zephyr-app: samples/hello_world
+-   :board: nucleo_n657x0_q
+-   :maybe-skip-config:
+-   :goals: debug
++For a standalone first-stage application, use ``west debug`` with its
++``nucleo_n657x0_q//fsbl`` or ``nucleo_n657x0_q//sb`` build directory.
+ 
+ .. note::
+    To enable debugging, before powering on the board, set the boot pins in the following configuration:
+@@ -307,7 +386,9 @@ Here is an example for the :zephyr:code-sample:`hello_world` application.
+ Another solution for debugging is to use STM32CubeIDE:
+ 
+ * Go to :menuselection:`File --> Import` and select :menuselection:`C/C++ --> STM32 Cortex-M Executable`.
+-* In the :guilabel:`Executable` field, browse to your ``<ZEPHYR_PATH>/build/zephyr/zephyr.elf``.
++* In the :guilabel:`Executable` field, select the first-stage image ELF
++  (``build/mcuboot/zephyr/zephyr.elf`` for sysbuild or ``build/zephyr/zephyr.elf``
++  for a standalone first-stage image).
+ * In :guilabel:`MCU` field, select ``STM32N657X0HxQ``.
+ * Click on :guilabel:`Finish`.
+ * Finally, click on :guilabel:`Debug` to start the debugging session.
+diff --git a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q-common.dtsi b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q-common.dtsi
+index 475544803ec..9e4b0eb858c 100644
+--- a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q-common.dtsi
++++ b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q-common.dtsi
+@@ -18,6 +18,10 @@
+ 		zephyr,sram = &axisram2;
+ 		zephyr,canbus = &fdcan1;
+ 		spi-flash0 = &mx25um51245g;
++		zephyr,flash-controller = &mx25um51245g;
++		zephyr,flash = &ext_flash;
++		zephyr,code-partition = &slot0_partition;
++		mcuboot,image-ram = &axisram1;
+ 		volt-sensor0 = &vbat;
+ 		volt-sensor1 = &vddcore;
+ 	};
+@@ -312,11 +316,6 @@ zephyr_udc0: &usbotg_hs1 {
+ 	};
+ };
+ 
+-&xspim {
+-	/* To be moved to sb/fsbl target once sysbuild added to the board */
+-	status = "okay";
+-};
+-
+ &xspi2 {
+ 	pinctrl-0 = <&xspim_p2_ncs1_pn1 &xspim_p2_dqs0_pn0 &xspim_p2_clk_pn6
+ 		     &xspim_p2_io0_pn2 &xspim_p2_io1_pn3 &xspim_p2_io2_pn4
+@@ -329,26 +328,54 @@ zephyr_udc0: &usbotg_hs1 {
+ 		compatible = "st,stm32-xspi-nor";
+ 		reg = <0>;
+ 		size = <DT_SIZE_M(512)>; /* 512 Mbits */
+-		ospi-max-frequency = <DT_FREQ_M(200)>;
++		ospi-max-frequency = <DT_FREQ_M(50)>;
+ 		spi-bus-width = <XSPI_OCTO_MODE>;
+ 		data-rate = <XSPI_DTR_TRANSFER>;
+ 		four-byte-opcodes;
+ 		status = "okay";
+ 
+-		partitions {
+-			compatible = "fixed-partitions";
++		/* XSPI external flash mapping */
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges = <0x0 0x70000000 DT_SIZE_M(64)>;
++
++		ext_flash: ext-flash@0 {
++			compatible = "soc-nv-flash";
++			reg = <0x0 DT_SIZE_M(64)>;
++			write-block-size = <1>;
++			erase-block-size = <DT_SIZE_K(4)>;
+ 			#address-cells = <1>;
+ 			#size-cells = <1>;
+-
+-			storage_partition: partition@3ff0000 {
+-				label = "storage";
+-				/*
+-				 * Prevent access to the last 32bytes of the memory-mapped device
+-				 * Issue described in the STM32N6xxxx errata sheet ES0620 Rev 1:
+-				 * 2.4.5 Deadlock or data corruption when DQS is enabled and the
+-				 * wrap request includes the last address of the memory
+-				 */
+-				reg = <0x3ff0000 (DT_SIZE_K(64) - 32)>;
++			ranges;
++
++			partitions {
++				#address-cells = <1>;
++				#size-cells = <1>;
++				ranges;
++
++				boot_partition: partition@0 {
++					compatible = "zephyr,mapped-partition";
++					reg = <0x00000000 DT_SIZE_K(256)>;
++					label = "mcuboot";
++				};
++
++				slot0_partition: partition@40000 {
++					compatible = "zephyr,mapped-partition";
++					reg = <0x40000 DT_SIZE_M(4)>;
++					label = "image-0";
++				};
++
++				slot1_partition: partition@440000 {
++					compatible = "zephyr,mapped-partition";
++					reg = <0x440000 DT_SIZE_M(4)>;
++					label = "image-1";
++				};
++
++				storage_partition: partition@840000 {
++					compatible = "zephyr,mapped-partition";
++					reg = <0x840000 DT_SIZE_M(8)>;
++					label = "storage";
++				};
+ 			};
+ 		};
+ 	};
+@@ -363,7 +390,6 @@ zephyr_udc0: &usbotg_hs1 {
+ 	status = "okay";
+ 
+ 	vddio3 {
+-		hslv-mode = "on";
+ 		compensation-enabled;
+ 	};
+ };
+diff --git a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q.dts b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q.dts
+index d47c5bd1207..fb851b5b961 100644
+--- a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q.dts
++++ b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q.dts
+@@ -10,4 +10,8 @@
+ / {
+ 	model = "STMicroelectronics STM32N657X0-Q-NUCLEO board";
+ 	compatible = "st,stm32n657x0-q-nucleo";
++
++	chosen {
++		zephyr,sram = &axisram1;
++	};
+ };
+diff --git a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_defconfig b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_defconfig
+index edcf1e6354c..69ed70d9cf3 100644
+--- a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_defconfig
++++ b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_defconfig
+@@ -17,8 +17,5 @@ CONFIG_ARM_MPU=y
+ # Enable HW stack protection
+ CONFIG_HW_STACK_PROTECTION=y
+ 
+-# No internal Flash
+-CONFIG_XIP=n
+-
+ # HAL needs TRUSTED_EXECUTION_SECURE explicitly enabled
+ CONFIG_TRUSTED_EXECUTION_SECURE=y
+diff --git a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_stm32n657xx_fsbl.dts b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_stm32n657xx_fsbl.dts
+new file mode 100644
+index 00000000000..10c31ccafa7
+--- /dev/null
++++ b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_stm32n657xx_fsbl.dts
+@@ -0,0 +1,17 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/dts-v1/;
++#include "nucleo_n657x0_q-common.dtsi"
++
++/ {
++	model = "STMicroelectronics STM32N657X0-Q-NUCLEO board";
++	compatible = "st,stm32n657x0-q-nucleo-fsbl";
++};
++
++&xspim {
++	io-port-2 = <&xspi2>;
++	status = "okay";
++};
+diff --git a/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_stm32n657xx_fsbl_defconfig b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_stm32n657xx_fsbl_defconfig
+new file mode 100644
+index 00000000000..ca00d7e34b9
+--- /dev/null
++++ b/boards/st/nucleo_n657x0_q/nucleo_n657x0_q_stm32n657xx_fsbl_defconfig
+@@ -0,0 +1,15 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_SERIAL=y
++CONFIG_GPIO=y
++CONFIG_CONSOLE=y
++CONFIG_UART_CONSOLE=y
++CONFIG_ARM_MPU=y
++CONFIG_HW_STACK_PROTECTION=y
++CONFIG_ASSERT=y
++CONFIG_ASSERT_VERBOSE=y
++
++# The Boot ROM loads the first-stage bootloader into AXISRAM2.
++CONFIG_XIP=n
++CONFIG_TRUSTED_EXECUTION_SECURE=y
+diff --git a/boards/st/nucleo_n657x0_q/sysbuild.cmake b/boards/st/nucleo_n657x0_q/sysbuild.cmake
+new file mode 100644
+index 00000000000..f3b9313309f
+--- /dev/null
++++ b/boards/st/nucleo_n657x0_q/sysbuild.cmake
+@@ -0,0 +1,6 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++if(SB_CONFIG_BOOTLOADER_MCUBOOT)
++  set_target_properties(mcuboot PROPERTIES BOARD "nucleo_n657x0_q/stm32n657xx/fsbl")
++endif()
+diff --git a/boards/st/nucleo_n657x0_q/twister.yaml b/boards/st/nucleo_n657x0_q/twister.yaml
+index 40e561dd35f..2319e47fca1 100644
+--- a/boards/st/nucleo_n657x0_q/twister.yaml
++++ b/boards/st/nucleo_n657x0_q/twister.yaml
+@@ -25,6 +25,8 @@ vendor: st
+ variants:
+   nucleo_n657x0_q/stm32n657xx:
+     twister: false
++  nucleo_n657x0_q/stm32n657xx/fsbl:
++    twister: false
+   nucleo_n657x0_q/stm32n657xx/sb:
+     toolchain:
+       - zephyr
+diff --git a/boards/st/nucleo_wb55rg/board.cmake b/boards/st/nucleo_wb55rg/board.cmake
+index ecde7d77aa4..d1724346e47 100644
+--- a/boards/st/nucleo_wb55rg/board.cmake
++++ b/boards/st/nucleo_wb55rg/board.cmake
+@@ -1,10 +1,13 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ # keep first
+-board_runner_args(stm32cubeprogrammer "--port=swd" "--reset-mode=hw")
+-board_runner_args(pyocd "--target=stm32wb55rgvx")
++# board_runner_args(stm32cubeprogrammer "--port=swd" "--reset-mode=hw")
++# board_runner_args(pyocd "--target=stm32wb55rgvx")
+ 
+ # keep first
+-include(${ZEPHYR_BASE}/boards/common/stm32cubeprogrammer.board.cmake)
+-include(${ZEPHYR_BASE}/boards/common/openocd-stm32.board.cmake)
+-include(${ZEPHYR_BASE}/boards/common/pyocd.board.cmake)
++# include(${ZEPHYR_BASE}/boards/common/stm32cubeprogrammer.board.cmake)
++# include(${ZEPHYR_BASE}/boards/common/openocd-stm32.board.cmake)
++# include(${ZEPHYR_BASE}/boards/common/pyocd.board.cmake)
++board_runner_args(jlink "--device=stm32wb55rg" "--reset-after-load")
++
++include(${ZEPHYR_BASE}/boards/common/jlink.board.cmake)
+\ No newline at end of file
+diff --git a/boards/st/nucleo_wb55rg/nucleo_wb55rg.dts b/boards/st/nucleo_wb55rg/nucleo_wb55rg.dts
+index bf86fd5005e..770b1d85309 100644
+--- a/boards/st/nucleo_wb55rg/nucleo_wb55rg.dts
++++ b/boards/st/nucleo_wb55rg/nucleo_wb55rg.dts
+@@ -15,8 +15,8 @@
+ 	compatible = "st,stm32wb55rg-nucleo";
+ 
+ 	chosen {
+-		zephyr,console = &usart1;
+-		zephyr,shell-uart = &usart1;
++		zephyr,console = &lpuart1;
++		zephyr,shell-uart = &cdc_acm_uart0;
+ 		zephyr,bt-mon-uart = &lpuart1;
+ 		zephyr,bt-c2h-uart = &lpuart1;
+ 		zephyr,sram = &sram0;
+@@ -29,7 +29,7 @@
+ 		compatible = "gpio-leds";
+ 
+ 		blue_led_1: led_0 {
+-			gpios = <&gpiob 5 GPIO_ACTIVE_HIGH>;
++			gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>;
+ 			label = "User LED1";
+ 		};
+ 
+@@ -183,9 +183,7 @@
+ };
+ 
+ &lpuart1 {
+-	pinctrl-0 = <&lpuart1_tx_pc1 &lpuart1_rx_pc0
+-		     &lpuart1_cts_pa6 &lpuart1_rts_pb12>;
+-	hw-flow-control;
++	pinctrl-0 = <&lpuart1_tx_pa2 &lpuart1_rx_pa3>;
+ 	pinctrl-names = "default";
+ 	current-speed = <115200>;
+ 	status = "okay";
+@@ -217,6 +215,10 @@ zephyr_udc0: &usb {
+ 	status = "okay";
+ 	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+ 	pinctrl-names = "default";
++
++	cdc_acm_uart0: cdc_acm_uart0 {
++		compatible = "zephyr,cdc-acm-uart";
++	};
+ };
+ 
+ &rng {
+diff --git a/boards/st/stm32n6570_dk/board.cmake b/boards/st/stm32n6570_dk/board.cmake
+index 449cd6dd1b1..6f690c9eb33 100644
+--- a/boards/st/stm32n6570_dk/board.cmake
++++ b/boards/st/stm32n6570_dk/board.cmake
+@@ -9,7 +9,7 @@ else()
+   board_runner_args(stm32cubeprogrammer "--port=swd")
+   board_runner_args(stm32cubeprogrammer "--tool-opt= mode=HOTPLUG ap=1")
+   board_runner_args(stm32cubeprogrammer "--no-reset")
+-  board_runner_args(stm32cubeprogrammer "--extload=MX66UW1G45G_STM32N6570-DK.stldr")
++  board_runner_args(stm32cubeprogrammer "--extload=MX25UM51245G_STM32N6570-NUCLEO.stldr")
+ 
+   if(CONFIG_BOOTLOADER_MCUBOOT)
+     dt_chosen(app_partition_node PROPERTY "zephyr,code-partition")
+diff --git a/soc/st/stm32/stm32h7rsx/mpu_regions.c b/soc/st/stm32/stm32h7rsx/mpu_regions.c
+index d39bc0a7e16..682e214ae5e 100644
+--- a/soc/st/stm32/stm32h7rsx/mpu_regions.c
++++ b/soc/st/stm32/stm32h7rsx/mpu_regions.c
+@@ -43,7 +43,7 @@ static const struct arm_mpu_region mpu_regions[] = {
+ #if defined(sram_eth_node) && DT_NODE_HAS_STATUS_OKAY(sram_eth_node)
+ 	/* Region 6 - Ethernet DMA buffer RAM */
+ 	MPU_REGION_ENTRY("SRAM_ETH_BUF", DT_REG_ADDR(sram_eth_node),
+-			 REGION_RAM_NOCACHE_ATTR(REGION_16K)),
++			 REGION_RAM_NOCACHE_ATTR(REGION_64K)),
+ 	/* Region 7 - Ethernet DMA descriptor RAM (overlays the first 256B of SRAM_ETH_BUF) */
+ 	MPU_REGION_ENTRY("SRAM_ETH_DESC", DT_REG_ADDR(sram_eth_node), REGION_PPB_ATTR(REGION_256B)),
+ #endif
+diff --git a/soc/st/stm32/stm32h7rsx/sections.ld b/soc/st/stm32/stm32h7rsx/sections.ld
+index c40cebc66ea..edbeb274aa2 100644
+--- a/soc/st/stm32/stm32h7rsx/sections.ld
++++ b/soc/st/stm32/stm32h7rsx/sections.ld
+@@ -14,7 +14,7 @@ SECTION_DATA_PROLOGUE(eth_stm32,(NOLOAD),)
+     *(.eth_stm32_desc)
+     . = ABSOLUTE(DT_REG_ADDR(sram_eth_node)) + 256;
+     *(.eth_stm32_buf)
+-    . = ABSOLUTE(DT_REG_ADDR(sram_eth_node)) + 16K;
++    . = ABSOLUTE(DT_REG_ADDR(sram_eth_node)) + DT_REG_SIZE(sram_eth_node);
+ } GROUP_DATA_LINK_IN(LINKER_DT_NODE_REGION_NAME_TOKEN(sram_eth_node), LINKER_DT_NODE_REGION_NAME_TOKEN(sram_eth_node))
+ #endif /* DT_NODE_HAS_STATUS_OKAY(sram_eth_node) */
+ 
