@@ -1,0 +1,19 @@
+mainmenu "stm32n6"
+
+source "Kconfig.zephyr"
+
+config APP_HAL_STM32_N6
+    bool "ST Cube HAL"
+    default y
+    select ATOMIC_OPERATIONS_C
+
+    select USE_STM32_HAL_GPIO
+    select USE_STM32_HAL_PWR
+	select USE_STM32_HAL_PWR_EX
+    select USE_STM32_HAL_PKA
+	select USE_STM32_HAL_HASH
+	select USE_STM32_HAL_CRYP
+	select USE_STM32_HAL_CRYP_EX
+    select USE_STM32_LL_USB
+	select USE_STM32_HAL_PCD
+	select USE_STM32_HAL_PCD_EX

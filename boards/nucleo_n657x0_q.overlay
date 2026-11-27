@@ -1,0 +1,30 @@
+&axisram3 {
+    status = "okay";
+};
+
+&axisram4 {
+    status = "okay";
+};
+
+&axisram5 {
+    status = "okay";
+};
+
+&axisram6 {
+    status = "okay";
+};
+
+&backup_sram {
+    status = "okay";
+};
+
+&gpdma1 {
+    status = "okay";
+};
+
+&usart1 {
+	fifo-enable;
+	dmas = <&gpdma1 1 108 STM32_DMA_PERIPH_TX>,
+	       <&gpdma1 0 107 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
+};
